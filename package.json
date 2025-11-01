@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postbuild": "npx --yes @cloudflare/next-on-pages@latest --skip-build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "deploy:cf": "wrangler deploy .vercel/output/static/_worker.js/index.js --assets=.vercel/output/static"
   },
   "dependencies": {
     "react": "19.2.0",
