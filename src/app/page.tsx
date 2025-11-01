@@ -166,7 +166,7 @@ export default function Home() {
             <button
               type="submit"
               disabled={createLoading}
-              className="w-full rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-400 focus:ring-2 focus:ring-purple-300 disabled:cursor-not-allowed disabled:bg-purple-500/40"
+              className="w-full rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-white focus:ring-2 focus:ring-slate-100 disabled:cursor-not-allowed disabled:bg-slate-700/60 disabled:text-slate-400/60 dark:bg-slate-100"
             >
               {createLoading ? "Creating..." : "Create room"}
             </button>

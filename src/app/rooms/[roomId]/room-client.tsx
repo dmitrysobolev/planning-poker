@@ -12,7 +12,7 @@ type RoomClientProps = {
 
 const POLL_INTERVAL = 3000;
 
-type VoteResponse = RoomSummary & { autoRevealed?: boolean };
+type RoomUpdateResponse = RoomSummary & { autoRevealed?: boolean };
 
 export default function RoomClient({ roomId }: RoomClientProps) {
   const router = useRouter();
@@ -25,6 +25,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [voteLoading, setVoteLoading] = useState(false);
+  const [readyLoading, setReadyLoading] = useState(false);
   const [revealLoading, setRevealLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   const [strategyLoading, setStrategyLoading] = useState(false);
@@ -32,6 +33,18 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   useEffect(() => {
     setParticipantId(getParticipant(roomId));
   }, [roomId]);
+
+  useEffect(() => {
+    if (!infoMessage) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setInfoMessage(null);
+    }, 5000);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [infoMessage]);
 
   useEffect(() => {
     let active = true;
@@ -52,12 +65,38 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         if (!active) {
           return;
         }
+        let nextInfo: string | null | undefined;
         setRoom((previous) => {
-          if (previous && !previous.revealed && data.revealed) {
-            setInfoMessage((current) => current ?? "Votes revealed.");
+          if (!previous) {
+            return data;
           }
+          const wasRevealed = previous.revealed;
+          const isNowRevealed = data.revealed;
+          const allReady = data.participants.every((participant) => participant.ready);
+          const hasProgressBefore = previous.participants.some(
+            (participant) => participant.ready || participant.hasVoted,
+          );
+          const clearedNow = data.participants.every(
+            (participant) => !participant.ready && !participant.hasVoted,
+          );
+          const isNewer = data.updatedAt > previous.updatedAt;
+
+          if (!wasRevealed && isNowRevealed) {
+            nextInfo = allReady
+              ? "All participants are ready. Votes revealed automatically."
+              : "Votes revealed.";
+          } else if (
+            (wasRevealed && !isNowRevealed) ||
+            (isNewer && !isNowRevealed && hasProgressBefore && clearedNow)
+          ) {
+            nextInfo = "Round reset. Ready for new estimates.";
+          }
+
           return data;
         });
+        if (typeof nextInfo !== "undefined") {
+          setInfoMessage(nextInfo);
+        }
         setInitialLoadError(null);
 
         if (participantId) {
@@ -185,18 +224,98 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       if (!response.ok) {
         throw new Error(data.error || "Unable to submit vote");
       }
-      const { autoRevealed, ...summary } = data as VoteResponse;
-      setRoom(summary);
+      const { autoRevealed, ...summary } = data as RoomUpdateResponse;
+      let nextMessage: string | null = null;
       if (autoRevealed) {
-        setInfoMessage("All participants voted. Votes were revealed automatically.");
+        nextMessage = "All participants are ready. Votes revealed automatically.";
       } else if (!wasRevealed && summary.revealed) {
-        setInfoMessage("Votes revealed.");
+        nextMessage = "Votes revealed.";
+      } else if (wasRevealed && !summary.revealed) {
+        nextMessage = null;
+      } else {
+        const self = summary.participants.find((p) => p.id === participantId);
+        if (self) {
+          if (self.ready) {
+            nextMessage = "Selection saved.";
+          } else if (self.hasVoted) {
+            nextMessage = "Selection saved. Press Ready when you're satisfied.";
+          } else {
+            nextMessage = "Selection cleared.";
+          }
+        }
       }
+      setRoom(summary);
+      setInfoMessage(nextMessage);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Vote failed");
       setInfoMessage(null);
     } finally {
       setVoteLoading(false);
+    }
+  };
+
+  const handleReady = async (ready: boolean) => {
+    if (!participantId) {
+      setActionError("Join the room before updating readiness.");
+      return;
+    }
+    if (!room) {
+      setActionError("Room is still loading. Try again in a moment.");
+      return;
+    }
+    if (room.revealed) {
+      setActionError("Start a new round before updating readiness.");
+      return;
+    }
+    const self = room.participants.find((p) => p.id === participantId);
+    if (ready && (!self || !self.vote)) {
+      setActionError("Pick a card before marking ready.");
+      return;
+    }
+    setReadyLoading(true);
+    setActionError(null);
+    setInfoMessage(null);
+    const wasRevealed = room.revealed;
+    try {
+      const response = await fetch(`/api/rooms/${roomId}/ready`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          participantId,
+          ready,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to update readiness");
+      }
+      const { autoRevealed, ...summary } = data as RoomUpdateResponse;
+      let nextMessage: string | null = null;
+      if (autoRevealed) {
+        nextMessage = "All participants are ready. Votes revealed automatically.";
+      } else if (!wasRevealed && summary.revealed) {
+        nextMessage = "Votes revealed.";
+      } else if (wasRevealed && !summary.revealed) {
+        nextMessage = "Round reset. Ready for new estimates.";
+      } else {
+        const updatedSelf = summary.participants.find((p) => p.id === participantId);
+        if (updatedSelf) {
+          if (updatedSelf.ready) {
+            nextMessage = "You're ready. Waiting for the rest of the team.";
+          } else {
+            nextMessage = "You're no longer ready.";
+          }
+        }
+      }
+      setRoom(summary);
+      setInfoMessage(nextMessage);
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Failed to update readiness",
+      );
+      setInfoMessage(null);
+    } finally {
+      setReadyLoading(false);
     }
   };
 
@@ -221,6 +340,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setRoom(summary);
       if (!room?.revealed && summary.revealed) {
         setInfoMessage("Votes revealed.");
+      } else if (room?.revealed && !summary.revealed) {
+        setInfoMessage("Round reset. Ready for new estimates.");
       }
     } catch (error) {
       setActionError(
@@ -296,11 +417,47 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }
   };
 
-  const leaveRoom = () => {
-    clearParticipant(roomId);
-    setParticipantId(null);
-    setParticipantName("");
+  const leaveRoom = async () => {
+    if (!participantId) {
+      clearParticipant(roomId);
+      setParticipantId(null);
+      setParticipantName("");
+      setInfoMessage(null);
+      router.push("/");
+      return;
+    }
+    setActionError(null);
     setInfoMessage(null);
+    try {
+      const response = await fetch(
+        `/api/rooms/${roomId}/participants/${participantId}`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to leave room");
+      }
+      const { autoRevealed, ...summary } = data as RoomUpdateResponse;
+      setRoom(summary);
+      clearParticipant(roomId);
+      setParticipantId(null);
+      setParticipantName("");
+      if (autoRevealed) {
+        setInfoMessage(
+          "All participants are ready. Votes revealed automatically.",
+        );
+      } else {
+        setInfoMessage("You left the room.");
+      }
+      router.push("/");
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Failed to leave room",
+      );
+    }
   };
 
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -368,7 +525,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               type="button"
               onClick={handleReveal}
               disabled={!room || room.revealed || revealLoading}
-              className="rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-400 focus:ring-2 focus:ring-purple-300 disabled:cursor-not-allowed disabled:bg-purple-500/40"
+              className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-400 hover:text-white focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:border-slate-600/60 disabled:text-slate-400/60"
             >
               {!room
                 ? "Loading…"
@@ -384,12 +541,14 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               disabled={resetLoading || !room}
               className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-purple-400 hover:text-white focus:ring-2 focus:ring-purple-300 disabled:cursor-not-allowed disabled:border-slate-600/60 disabled:text-slate-400/60"
             >
-              {resetLoading ? "Resetting…" : "Reset round"}
+              {resetLoading ? "Resetting…" : "Reset"}
             </button>
             {participantId ? (
               <button
                 type="button"
-                onClick={leaveRoom}
+                onClick={() => {
+                  void leaveRoom();
+                }}
                 className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-red-400 hover:text-red-200 focus:ring-2 focus:ring-red-300"
               >
                 Leave
@@ -411,35 +570,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
         <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
           <div className="rounded-2xl bg-slate-900 p-6 shadow-lg">
-            <h2 className="text-lg font-semibold text-white">Pick a card</h2>
-            <p className="mt-1 text-sm text-slate-300">
-              Your selection stays hidden until someone reveals the round.
-              {!room ? " Waiting for room data…" : ""}
-            </p>
-            <div className="mt-6 grid grid-cols-3 gap-4 md:grid-cols-4 lg:grid-cols-6">
-              {cards.map((value) => {
-                const isSelected = myParticipant?.vote === value && !room?.revealed;
-                return (
-                  <button
-                    type="button"
-                    key={value}
-                    className={`flex h-20 items-center justify-center rounded-xl border text-lg font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                      isSelected
-                        ? "border-purple-400 bg-purple-500/20 text-white shadow-lg"
-                        : "border-slate-700 bg-slate-950 text-slate-200 hover:border-purple-400 hover:text-white"
-                    } ${voteLoading ? "opacity-70" : ""}`}
-                    onClick={() =>
-                      handleVote(
-                        isSelected && !room?.revealed ? null : value,
-                      )
-                    }
-                    disabled={voteLoading || Boolean(room?.revealed) || !room}
-                  >
-                    {value}
-                  </button>
-                );
-              })}
-            </div>
             {room?.revealed ? (
               <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950 p-4">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
@@ -463,7 +593,69 @@ export default function RoomClient({ roomId }: RoomClientProps) {
                   </ul>
                 )}
               </div>
-            ) : null}
+            ) : (
+              <>
+                <h2 className="text-lg font-semibold text-white">Pick a card</h2>
+                <p className="mt-1 text-sm text-slate-300">
+                  Your selection stays hidden until someone reveals the round.
+                  {!room ? " Waiting for room data…" : ""}
+                </p>
+                <div className="mt-6 grid grid-cols-3 gap-4 md:grid-cols-4 lg:grid-cols-6">
+                  {cards.map((value) => {
+                    const isSelected = myParticipant?.vote === value && !room?.revealed;
+                    return (
+                      <button
+                        type="button"
+                        key={value}
+                        className={`flex h-20 items-center justify-center rounded-xl border text-lg font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                          isSelected
+                            ? "border-purple-400 bg-purple-500/20 text-white shadow-lg"
+                            : "border-slate-700 bg-slate-950 text-slate-200 hover:border-purple-400 hover:text-white"
+                        } ${voteLoading ? "opacity-70" : ""}`}
+                        onClick={() =>
+                          handleVote(
+                            isSelected && !room?.revealed ? null : value,
+                          )
+                        }
+                        disabled={
+                          voteLoading ||
+                          readyLoading ||
+                          Boolean(room?.revealed) ||
+                          !room
+                        }
+                      >
+                        {value}
+                      </button>
+                    );
+                  })}
+                </div>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => handleReady(!(myParticipant?.ready ?? false))}
+                disabled={
+                      !room ||
+                      room.revealed ||
+                      readyLoading ||
+                      revealLoading ||
+                      voteLoading ||
+                      (!myParticipant?.ready && !myParticipant?.vote)
+                    }
+                className={`rounded-lg px-4 py-2 text-sm font-semibold transition focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:border-slate-600/60 disabled:text-slate-400/60 ${
+                  myParticipant?.ready
+                    ? "border border-slate-600 text-slate-200 hover:border-slate-400 hover:text-white"
+                    : "border border-slate-600 bg-slate-900 text-slate-200 hover:border-slate-400 hover:text-white"
+                }`}
+              >
+                {readyLoading
+                  ? "Updating…"
+                  : myParticipant?.ready
+                    ? "Cancel ready"
+                        : "Ready"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
           <aside className="rounded-2xl bg-slate-900 p-6 shadow-lg">
@@ -473,18 +665,23 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             <ul className="mt-4 space-y-3">
               {(room?.participants ?? []).map((participant) => {
                 const isSelf = participant.id === participantId;
+                const hasVote = participant.hasVoted;
                 const status = room?.revealed
                   ? participant.vote ?? "—"
-                  : participant.hasVoted
+                  : participant.ready
                     ? "Ready"
-                    : "Thinking…";
+                    : hasVote
+                      ? "Selected"
+                      : "Picking…";
                 return (
                   <li
                     key={participant.id}
                     className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm ${
-                      participant.hasVoted
-                        ? "border-purple-400/40 bg-purple-500/10"
-                        : "border-slate-800 bg-slate-950"
+                      participant.ready
+                        ? "border-emerald-400/60 bg-emerald-500/10"
+                        : hasVote
+                          ? "border-purple-400/40 bg-purple-500/10"
+                          : "border-slate-800 bg-slate-950"
                     }`}
                   >
                     <span className="font-medium text-slate-100">

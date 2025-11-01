@@ -5,6 +5,7 @@ export type ParticipantSummary = {
   name: string;
   vote: string | null;
   hasVoted: boolean;
+  ready: boolean;
 };
 
 export type RoomSummary = {

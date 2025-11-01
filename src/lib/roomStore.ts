@@ -8,6 +8,7 @@ export type Participant = {
   vote?: string;
   joinedAt: number;
   lastActiveAt: number;
+  ready: boolean;
 };
 
 export type Room = {
@@ -86,6 +87,9 @@ export function addParticipant(roomId: string, name: string, participantId?: str
     if (participant) {
       participant.name = name.trim();
       participant.lastActiveAt = timestamp;
+      if (typeof participant.ready === "undefined") {
+        participant.ready = false;
+      }
     }
   }
 
@@ -95,6 +99,7 @@ export function addParticipant(roomId: string, name: string, participantId?: str
       name: name.trim(),
       joinedAt: timestamp,
       lastActiveAt: timestamp,
+      ready: false,
     };
     room.participants.push(participant);
   }
@@ -119,6 +124,12 @@ export function setVote(
     throw new Error("Participant not found");
   }
 
+  if (typeof participant.ready === "undefined") {
+    participant.ready = false;
+  }
+
+  const previousVote = participant.vote;
+
   if (vote !== undefined) {
     ensureVoteIsValid(room.strategy, vote);
     participant.vote = vote;
@@ -126,8 +137,76 @@ export function setVote(
     delete participant.vote;
   }
 
+  if (previousVote !== vote) {
+    participant.ready = false;
+  }
+
   participant.lastActiveAt = Date.now();
   room.updatedAt = participant.lastActiveAt;
+
+  const shouldRevealNow = shouldAutoReveal(room);
+  const autoRevealed = !room.revealed && shouldRevealNow;
+
+  if (shouldRevealNow) {
+    room.revealed = true;
+  }
+
+  return { room, autoRevealed };
+}
+
+export function setParticipantReady(
+  roomId: string,
+  participantId: string,
+  ready: boolean,
+): { room: Room; autoRevealed: boolean } {
+  const room = roomStore.get(roomId);
+  if (!room) {
+    throw new Error("Room not found");
+  }
+
+  const participant = room.participants.find((p) => p.id === participantId);
+  if (!participant) {
+    throw new Error("Participant not found");
+  }
+
+  if (typeof participant.ready === "undefined") {
+    participant.ready = false;
+  }
+
+  if (ready && typeof participant.vote === "undefined") {
+    throw new Error("Select a card before marking ready");
+  }
+
+  participant.ready = ready;
+  participant.lastActiveAt = Date.now();
+  room.updatedAt = participant.lastActiveAt;
+
+  const shouldRevealNow = shouldAutoReveal(room);
+  const autoRevealed = !room.revealed && shouldRevealNow;
+
+  if (shouldRevealNow) {
+    room.revealed = true;
+  }
+
+  return { room, autoRevealed };
+}
+
+export function removeParticipant(
+  roomId: string,
+  participantId: string,
+): { room: Room; autoRevealed: boolean } {
+  const room = roomStore.get(roomId);
+  if (!room) {
+    throw new Error("Room not found");
+  }
+
+  const index = room.participants.findIndex((p) => p.id === participantId);
+  if (index === -1) {
+    throw new Error("Participant not found");
+  }
+
+  room.participants.splice(index, 1);
+  room.updatedAt = Date.now();
 
   const shouldRevealNow = shouldAutoReveal(room);
   const autoRevealed = !room.revealed && shouldRevealNow;
@@ -157,6 +236,7 @@ export function resetVotes(roomId: string, strategy?: PlanningStrategy) {
 
   for (const participant of room.participants) {
     delete participant.vote;
+    participant.ready = false;
   }
 
   if (strategy) {
@@ -195,6 +275,7 @@ export function serializeRoom(room: Room, exposeVoteFor?: string): RoomSummary {
         name: participant.name,
         hasVoted,
         vote: shouldExposeVote && hasVoted ? participant.vote! : null,
+        ready: Boolean(participant.ready),
       };
     }),
   };
@@ -234,5 +315,8 @@ function shouldAutoReveal(room: Room) {
   if (room.participants.length === 0) {
     return false;
   }
-  return room.participants.every((participant) => typeof participant.vote !== "undefined");
+  return room.participants.every(
+    (participant) =>
+      participant.ready && typeof participant.vote !== "undefined",
+  );
 }
