@@ -1,4 +1,14 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Planning Poker for Agile Teams
+
+This repository hosts a collaborative Planning Poker web app built with Next.js, React, and Tailwind CSS. The tool lets product teams estimate work together in real time:
+
+- Spin up lightweight rooms for each estimation session.
+- Invite others with a shareable `/join` link; each participant keeps their identity in-browser.
+- Choose between Fibonacci and T‑Shirt sizing decks.
+- Pick cards privately, then mark yourself “Ready.” Votes reveal automatically when everyone is ready, or a facilitator can reveal/reset manually.
+- Round resets, strategy changes, and departures update instantly for every client (polled every 3 seconds).
+
+State is stored in-process for simplicity—great for demos and small teams. For production you’d back it with a shared datastore (Redis, Postgres, etc.) so rooms survive restarts and multiple server instances.
 
 ## Getting Started
 
