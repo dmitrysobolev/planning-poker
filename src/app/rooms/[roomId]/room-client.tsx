@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { getParticipant, saveParticipant, clearParticipant } from "@/lib/clientStorage";
 import { PlanningStrategy, STRATEGIES, DEFAULT_STRATEGY } from "@/lib/strategies";
 import type { RoomSummary } from "@/types/room";
+import { Copy } from "lucide-react";
 
 type RoomClientProps = {
   roomId: string;
@@ -461,12 +462,36 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   };
 
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [copyingRoomId, setCopyingRoomId] = useState(false);
+  const [copyingLink, setCopyingLink] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       setShareUrl(`${window.location.origin}/rooms/${roomId}/join`);
     }
   }, [roomId]);
+
+  const handleCopy = async (text: string, type: "room" | "link") => {
+    try {
+      if (type === "room") {
+        setCopyingRoomId(true);
+      } else {
+        setCopyingLink(true);
+      }
+      await navigator.clipboard.writeText(text);
+      setInfoMessage(type === "room" ? "Room code copied." : "Join link copied.");
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Failed to copy to clipboard",
+      );
+    } finally {
+      if (type === "room") {
+        setCopyingRoomId(false);
+      } else {
+        setCopyingLink(false);
+      }
+    }
+  };
 
   if (initialLoadError) {
     return (
@@ -490,17 +515,39 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     <main className="min-h-screen bg-slate-950 text-white">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-12">
         <header className="flex flex-col justify-between gap-4 rounded-2xl bg-slate-900 p-6 shadow-lg md:flex-row md:items-center">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">
-              Room {roomId}
-            </h1>
-            <p className="mt-2 text-sm text-slate-300">
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-semibold tracking-tight">
+                Room {roomId}
+              </h1>
+              <button
+                type="button"
+                onClick={() => handleCopy(roomId, "room")}
+                disabled={copyingRoomId}
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-600 text-slate-200 transition hover:border-slate-400 hover:text-white focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:border-slate-600/60 disabled:text-slate-400/60"
+                aria-label="Copy room code"
+              >
+                <Copy className={`h-3 w-3 ${copyingRoomId ? "opacity-60" : ""}`} />
+              </button>
+            </div>
+            <p className="text-sm text-slate-300">
               {room
                 ? "Share this join link with your teammates to invite them in."
                 : "Syncing the latest state. You can still share this link or join below."}
             </p>
             {shareUrl ? (
-              <p className="mt-2 text-xs text-slate-400 break-all">{shareUrl}</p>
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <span className="break-all">{shareUrl}</span>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(shareUrl, "link")}
+                  disabled={copyingLink}
+                  className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-600 text-slate-200 transition hover:border-slate-400 hover:text-white focus:ring-1 focus:ring-slate-300 disabled:cursor-not-allowed disabled:border-slate-600/60 disabled:text-slate-400/60"
+                  aria-label="Copy join link"
+                >
+                  <Copy className={`h-3 w-3 ${copyingLink ? "opacity-60" : ""}`} />
+                </button>
+              </div>
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -549,10 +596,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
                 onClick={() => {
                   void leaveRoom();
                 }}
-                className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-red-400 hover:text-red-200 focus:ring-2 focus:ring-red-300"
-              >
-                Leave
-              </button>
+              className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-red-400 hover:text-white focus:ring-2 focus:ring-red-300"
+            >
+              Leave
+            </button>
             ) : null}
           </div>
         </header>
