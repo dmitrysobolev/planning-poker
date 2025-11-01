@@ -9,6 +9,8 @@ type RevealPayload = {
   participantId?: string;
 };
 
+export const runtime = "edge";
+
 export async function POST(request: NextRequest, context: RouteContext) {
   const { roomId } = await context.params;
   const normalizedRoomId = roomId.toUpperCase();

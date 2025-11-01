@@ -1,4 +1,3 @@
-import { randomUUID } from "crypto";
 import { DEFAULT_STRATEGY, PlanningStrategy, STRATEGIES } from "./strategies";
 import type { RoomSummary } from "@/types/room";
 
@@ -29,6 +28,14 @@ const globalScope = globalThis as RoomStoreGlobal;
 const roomStore =
   globalScope.__planningPokerRoomStore ??
   (globalScope.__planningPokerRoomStore = new Map<string, Room>());
+
+function generateParticipantId() {
+  const cryptoRef = globalThis.crypto as Crypto | undefined;
+  if (cryptoRef && typeof cryptoRef.randomUUID === "function") {
+    return cryptoRef.randomUUID();
+  }
+  return `participant-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+}
 
 export function createRoom(
   strategy: PlanningStrategy = DEFAULT_STRATEGY,
@@ -95,7 +102,7 @@ export function addParticipant(roomId: string, name: string, participantId?: str
 
   if (!participant) {
     participant = {
-      id: randomUUID(),
+      id: generateParticipantId(),
       name: name.trim(),
       joinedAt: timestamp,
       lastActiveAt: timestamp,

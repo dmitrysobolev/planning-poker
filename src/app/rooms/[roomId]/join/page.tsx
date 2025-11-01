@@ -7,6 +7,8 @@ type JoinPageProps = {
   params: Promise<JoinPageParams> | JoinPageParams;
 };
 
+export const runtime = "edge";
+
 export default async function JoinPage({ params }: JoinPageProps) {
   const resolvedParams = await Promise.resolve(params);
   const roomId = resolvedParams.roomId?.toUpperCase();
