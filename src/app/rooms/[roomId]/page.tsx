@@ -7,8 +7,6 @@ type RoomPageProps = {
   params: Promise<RoomPageParams> | RoomPageParams;
 };
 
-export const runtime = "edge";
-
 export default async function RoomPage({ params }: RoomPageProps) {
   const resolvedParams = await Promise.resolve(params);
   const roomId = resolvedParams.roomId?.toUpperCase();

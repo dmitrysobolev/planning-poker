@@ -5,8 +5,6 @@ type RouteContext = {
   params: Promise<{ roomId: string; participantId: string }>;
 };
 
-export const runtime = "edge";
-
 export async function DELETE(_: Request, context: RouteContext) {
   const { roomId, participantId } = await context.params;
   const normalizedRoomId = roomId.toUpperCase();

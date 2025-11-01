@@ -6,8 +6,6 @@ type RouteContext = {
   params: Promise<{ roomId: string }>;
 };
 
-export const runtime = "edge";
-
 export async function GET(request: NextRequest, context: RouteContext) {
   const { roomId } = await context.params;
   const normalizedRoomId = roomId.toUpperCase();
