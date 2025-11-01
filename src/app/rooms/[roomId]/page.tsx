@@ -1,10 +1,19 @@
+import { notFound } from "next/navigation";
 import RoomClient from "./room-client";
 
+type RoomPageParams = { roomId?: string };
+
 type RoomPageProps = {
-  params: { roomId: string };
+  params: Promise<RoomPageParams> | RoomPageParams;
 };
 
-export default function RoomPage({ params }: RoomPageProps) {
-  const roomId = params.roomId.toUpperCase();
+export default async function RoomPage({ params }: RoomPageProps) {
+  const resolvedParams = await Promise.resolve(params);
+  const roomId = resolvedParams.roomId?.toUpperCase();
+
+  if (!roomId) {
+    notFound();
+  }
+
   return <RoomClient roomId={roomId} />;
 }

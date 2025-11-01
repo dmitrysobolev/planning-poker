@@ -8,6 +8,7 @@ type RouteContext = {
 type ParticipantPayload = {
   name?: string;
   participantId?: string;
+  reuseExisting?: boolean;
 };
 
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -29,10 +30,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   try {
+    const reuseExisting =
+      typeof body.reuseExisting === "boolean" ? body.reuseExisting : false;
     const { participant } = addParticipant(
       normalizedRoomId,
       body.name,
-      body.participantId,
+      reuseExisting ? body.participantId : undefined,
     );
 
     const summary = getRoomSummary(normalizedRoomId, participant.id);

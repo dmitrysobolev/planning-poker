@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getParticipant, saveParticipant, clearParticipant } from "@/lib/clientStorage";
-import { PlanningStrategy, STRATEGIES } from "@/lib/strategies";
+import { PlanningStrategy, STRATEGIES, DEFAULT_STRATEGY } from "@/lib/strategies";
 import type { RoomSummary } from "@/types/room";
 
 type RoomClientProps = {
@@ -11,6 +11,8 @@ type RoomClientProps = {
 };
 
 const POLL_INTERVAL = 3000;
+
+type VoteResponse = RoomSummary & { autoRevealed?: boolean };
 
 export default function RoomClient({ roomId }: RoomClientProps) {
   const router = useRouter();
@@ -21,6 +23,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [joinError, setJoinError] = useState<string | null>(null);
   const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [voteLoading, setVoteLoading] = useState(false);
   const [revealLoading, setRevealLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
@@ -49,7 +52,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         if (!active) {
           return;
         }
-        setRoom(data);
+        setRoom((previous) => {
+          if (previous && !previous.revealed && data.revealed) {
+            setInfoMessage((current) => current ?? "Votes revealed.");
+          }
+          return data;
+        });
         setInitialLoadError(null);
 
         if (participantId) {
@@ -89,8 +97,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   }, [participantId, room]);
 
   const cards = useMemo(() => {
-    const strategy = room?.strategy ?? "fibonacci";
-    return STRATEGIES[strategy as PlanningStrategy]?.values ?? [];
+    const strategy = room?.strategy ?? DEFAULT_STRATEGY;
+    return STRATEGIES[strategy]?.values ?? [];
   }, [room?.strategy]);
 
   const voteSummary = useMemo(() => {
@@ -124,13 +132,18 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || "Unable to join room");
+        throw new Error((data as { error?: string }).error || "Unable to join room");
       }
-      const nextParticipantId = (data as { participantId: string }).participantId;
+      const { participantId: nextParticipantId, room: nextRoom } = data as {
+        participantId: string;
+        room: RoomSummary;
+      };
       saveParticipant(roomId, nextParticipantId);
       setParticipantId(nextParticipantId);
-      setRoom((data as { room: RoomSummary }).room);
+      setRoom(nextRoom);
+      setInfoMessage(null);
     } catch (error) {
+      setInfoMessage(null);
       setJoinError(
         error instanceof Error ? error.message : "Failed to join room",
       );
@@ -144,7 +157,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setActionError("Join the room before voting.");
       return;
     }
-    if (room?.revealed) {
+    if (!room) {
+      setActionError("Room is still loading. Try again in a moment.");
+      return;
+    }
+    if (room.revealed) {
       setActionError("Reset the round before casting new votes.");
       return;
     }
@@ -153,6 +170,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }
     setVoteLoading(true);
     setActionError(null);
+    setInfoMessage(null);
+    const wasRevealed = room.revealed;
     try {
       const response = await fetch(`/api/rooms/${roomId}/votes`, {
         method: "POST",
@@ -166,9 +185,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       if (!response.ok) {
         throw new Error(data.error || "Unable to submit vote");
       }
-      setRoom(data as RoomSummary);
+      const { autoRevealed, ...summary } = data as VoteResponse;
+      setRoom(summary);
+      if (autoRevealed) {
+        setInfoMessage("All participants voted. Votes were revealed automatically.");
+      } else if (!wasRevealed && summary.revealed) {
+        setInfoMessage("Votes revealed.");
+      }
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Vote failed");
+      setInfoMessage(null);
     } finally {
       setVoteLoading(false);
     }
@@ -180,6 +206,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }
     setRevealLoading(true);
     setActionError(null);
+    setInfoMessage(null);
     try {
       const response = await fetch(`/api/rooms/${roomId}/reveal`, {
         method: "POST",
@@ -190,11 +217,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       if (!response.ok) {
         throw new Error(data.error || "Unable to reveal votes");
       }
-      setRoom(data as RoomSummary);
+      const summary = data as RoomSummary;
+      setRoom(summary);
+      if (!room?.revealed && summary.revealed) {
+        setInfoMessage("Votes revealed.");
+      }
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "Failed to reveal votes",
       );
+      setInfoMessage(null);
     } finally {
       setRevealLoading(false);
     }
@@ -206,6 +238,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }
     setResetLoading(true);
     setActionError(null);
+    setInfoMessage(null);
     try {
       const response = await fetch(`/api/rooms/${roomId}/reset`, {
         method: "POST",
@@ -217,10 +250,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         throw new Error(data.error || "Unable to reset votes");
       }
       setRoom(data as RoomSummary);
+      setInfoMessage("Round reset. Ready for new estimates.");
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "Failed to reset votes",
       );
+      setInfoMessage(null);
     } finally {
       setResetLoading(false);
     }
@@ -235,6 +270,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }
     setStrategyLoading(true);
     setActionError(null);
+    setInfoMessage(null);
     try {
       const response = await fetch(`/api/rooms/${roomId}`, {
         method: "PATCH",
@@ -245,11 +281,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       if (!response.ok) {
         throw new Error(data.error || "Unable to change strategy");
       }
-      setRoom(data as RoomSummary);
+      const summary = data as RoomSummary;
+      setRoom(summary);
+      setInfoMessage(
+        `Switched to ${STRATEGIES[value].label}. Votes cleared for a fresh round.`,
+      );
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "Strategy change failed",
       );
+      setInfoMessage(null);
     } finally {
       setStrategyLoading(false);
     }
@@ -259,12 +300,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     clearParticipant(roomId);
     setParticipantId(null);
     setParticipantName("");
+    setInfoMessage(null);
   };
 
-  const shareUrl =
-    typeof window === "undefined"
-      ? ""
-      : `${window.location.origin}/rooms/${roomId}`;
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setShareUrl(`${window.location.origin}/rooms/${roomId}/join`);
+    }
+  }, [roomId]);
 
   if (initialLoadError) {
     return (
@@ -284,19 +329,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     );
   }
 
-  if (!room) {
-    return (
-      <main className="flex min-h-screen flex-col items-center justify-center bg-slate-950 px-6 text-center text-white">
-        <div className="rounded-2xl bg-slate-900 px-10 py-12 shadow-lg">
-          <h1 className="text-2xl font-semibold">Loading room…</h1>
-          <p className="mt-3 text-sm text-slate-300">
-            Hang tight while we fetch the latest state.
-          </p>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main className="min-h-screen bg-slate-950 text-white">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-12">
@@ -306,10 +338,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               Room {roomId}
             </h1>
             <p className="mt-2 text-sm text-slate-300">
-              Share this code with your teammates to invite them in.
+              {room
+                ? "Share this join link with your teammates to invite them in."
+                : "Syncing the latest state. You can still share this link or join below."}
             </p>
             {shareUrl ? (
-              <p className="mt-2 text-xs text-slate-400">{shareUrl}</p>
+              <p className="mt-2 text-xs text-slate-400 break-all">{shareUrl}</p>
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -318,11 +352,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             </label>
             <select
               className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-500/40"
-              value={room?.strategy ?? "fibonacci"}
+              value={room?.strategy ?? DEFAULT_STRATEGY}
               onChange={(event) =>
                 handleStrategyChange(event.target.value as PlanningStrategy)
               }
-              disabled={strategyLoading}
+              disabled={strategyLoading || !room}
             >
               {Object.entries(STRATEGIES).map(([key, config]) => (
                 <option key={key} value={key}>
@@ -333,15 +367,21 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             <button
               type="button"
               onClick={handleReveal}
-              disabled={room?.revealed || revealLoading || !room}
+              disabled={!room || room.revealed || revealLoading}
               className="rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-400 focus:ring-2 focus:ring-purple-300 disabled:cursor-not-allowed disabled:bg-purple-500/40"
             >
-              {room?.revealed ? "Votes revealed" : revealLoading ? "Revealing…" : "Reveal"}
+              {!room
+                ? "Loading…"
+                : room.revealed
+                  ? "Votes revealed"
+                  : revealLoading
+                    ? "Revealing…"
+                    : "Reveal"}
             </button>
             <button
               type="button"
               onClick={handleReset}
-              disabled={resetLoading}
+              disabled={resetLoading || !room}
               className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-purple-400 hover:text-white focus:ring-2 focus:ring-purple-300 disabled:cursor-not-allowed disabled:border-slate-600/60 disabled:text-slate-400/60"
             >
               {resetLoading ? "Resetting…" : "Reset round"}
@@ -363,12 +403,18 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             {actionError}
           </div>
         ) : null}
+        {infoMessage ? (
+          <div className="rounded-xl border border-emerald-400/60 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+            {infoMessage}
+          </div>
+        ) : null}
 
         <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
           <div className="rounded-2xl bg-slate-900 p-6 shadow-lg">
             <h2 className="text-lg font-semibold text-white">Pick a card</h2>
             <p className="mt-1 text-sm text-slate-300">
               Your selection stays hidden until someone reveals the round.
+              {!room ? " Waiting for room data…" : ""}
             </p>
             <div className="mt-6 grid grid-cols-3 gap-4 md:grid-cols-4 lg:grid-cols-6">
               {cards.map((value) => {
@@ -387,7 +433,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
                         isSelected && !room?.revealed ? null : value,
                       )
                     }
-                    disabled={voteLoading || Boolean(room?.revealed)}
+                    disabled={voteLoading || Boolean(room?.revealed) || !room}
                   >
                     {value}
                   </button>
@@ -496,9 +542,14 @@ export default function RoomClient({ roomId }: RoomClientProps) {
                   disabled={joinLoading}
                   className="w-full rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-400 focus:ring-2 focus:ring-purple-300 disabled:cursor-not-allowed disabled:bg-purple-500/40"
                 >
-                  {joinLoading ? "Joining..." : "Join room"}
+                  {joinLoading ? "Joining..." : room ? "Join room" : "Join now"}
                 </button>
               </form>
+              {!room ? (
+                <p className="mt-4 text-xs text-slate-400">
+                  We&apos;re still loading the latest room state, but you can go ahead and join.
+                </p>
+              ) : null}
             </div>
           </div>
         ) : null}

@@ -19,7 +19,15 @@ export type Room = {
   participants: Participant[];
 };
 
-const roomStore = new Map<string, Room>();
+type RoomStoreGlobal = {
+  __planningPokerRoomStore?: Map<string, Room>;
+};
+
+const globalScope = globalThis as RoomStoreGlobal;
+
+const roomStore =
+  globalScope.__planningPokerRoomStore ??
+  (globalScope.__planningPokerRoomStore = new Map<string, Room>());
 
 export function createRoom(
   strategy: PlanningStrategy = DEFAULT_STRATEGY,
@@ -96,7 +104,11 @@ export function addParticipant(roomId: string, name: string, participantId?: str
   return { room, participant };
 }
 
-export function setVote(roomId: string, participantId: string, vote?: string) {
+export function setVote(
+  roomId: string,
+  participantId: string,
+  vote?: string,
+): { room: Room; autoRevealed: boolean } {
   const room = roomStore.get(roomId);
   if (!room) {
     throw new Error("Room not found");
@@ -116,7 +128,15 @@ export function setVote(roomId: string, participantId: string, vote?: string) {
 
   participant.lastActiveAt = Date.now();
   room.updatedAt = participant.lastActiveAt;
-  return room;
+
+  const shouldRevealNow = shouldAutoReveal(room);
+  const autoRevealed = !room.revealed && shouldRevealNow;
+
+  if (shouldRevealNow) {
+    room.revealed = true;
+  }
+
+  return { room, autoRevealed };
 }
 
 export function revealVotes(roomId: string) {
@@ -205,4 +225,14 @@ function generateReadableId() {
     return generateReadableId();
   }
   return result;
+}
+
+function shouldAutoReveal(room: Room) {
+  if (room.revealed) {
+    return false;
+  }
+  if (room.participants.length === 0) {
+    return false;
+  }
+  return room.participants.every((participant) => typeof participant.vote !== "undefined");
 }

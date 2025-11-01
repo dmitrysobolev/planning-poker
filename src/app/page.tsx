@@ -127,10 +127,11 @@ export default function Home() {
               <input
                 id="host-name"
                 type="text"
-                placeholder="Optional"
+                placeholder="Casey"
                 value={hostName}
                 onChange={(event) => setHostName(event.target.value)}
                 className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-base text-white outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-500/40"
+                required
               />
             </div>
             <div>

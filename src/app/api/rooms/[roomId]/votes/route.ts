@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRoomSummary, setVote } from "@/lib/roomStore";
+import { serializeRoom, setVote } from "@/lib/roomStore";
 
 type RouteContext = {
   params: Promise<{ roomId: string }>;
@@ -29,9 +29,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   try {
-    setVote(normalizedRoomId, body.participantId, body.vote ?? undefined);
-    const summary = getRoomSummary(normalizedRoomId, body.participantId);
-    return NextResponse.json(summary);
+    const { room, autoRevealed } = setVote(
+      normalizedRoomId,
+      body.participantId,
+      body.vote ?? undefined,
+    );
+    const summary = serializeRoom(room, body.participantId);
+    return NextResponse.json({
+      ...summary,
+      autoRevealed,
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to update vote";
