@@ -5,7 +5,7 @@ This document outlines recommended improvements for the Planning Poker applicati
 ## 🔴 High Priority
 
 ### Testing & Quality Assurance
-- [ ] Add testing framework (Jest + React Testing Library)
+- [x] Add testing framework (Jest + React Testing Library)
 - [ ] Write unit tests for core business logic (`roomStore.ts`, `strategies.ts`)
 - [ ] Add integration tests for API endpoints
 - [ ] Write E2E tests for critical user flows (create room, join, vote, reveal)
