@@ -2,7 +2,6 @@ import {
   STRATEGIES,
   DEFAULT_STRATEGY,
   isPlanningStrategy,
-  type PlanningStrategy,
 } from "../strategies";
 
 describe("strategies", () => {
